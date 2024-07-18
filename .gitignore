@@ -1,0 +1,9 @@
+# Ignore JSON files
+filtered_student_scores.json
+student_scores.json
+
+# Ignore other typical files and folders
+*.pyc
+__pycache__/
+venv/
+.env
