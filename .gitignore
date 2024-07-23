@@ -1,0 +1,9 @@
+# Ignore JSON files
+score_2018.json
+score_2019.json
+
+# Ignore other typical files and folders
+*.pyc
+__pycache__/
+venv/
+.env
