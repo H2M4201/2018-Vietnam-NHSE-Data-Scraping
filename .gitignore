@@ -1,6 +1,11 @@
 # Ignore JSON files
+<<<<<<< HEAD
 score_2018.json
 score_2019.json
+=======
+filtered_student_scores.json
+student_scores.json
+>>>>>>> 9faebe995ec7edb34bd667e8491e61b9e0df6199
 
 # Ignore other typical files and folders
 *.pyc
