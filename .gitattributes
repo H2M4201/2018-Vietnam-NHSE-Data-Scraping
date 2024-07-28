@@ -1,0 +1,2 @@
+score_2018.json filter=lfs diff=lfs merge=lfs -text
+score_2019.json filter=lfs diff=lfs merge=lfs -text
