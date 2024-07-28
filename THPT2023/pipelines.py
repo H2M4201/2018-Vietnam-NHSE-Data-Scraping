@@ -8,19 +8,16 @@
 from itemadapter import ItemAdapter
 import sys
 import os
-import sys
-import os
 import pymysql
-import redis
 from sqlalchemy import create_engine, Column, String, DECIMAL
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 
-BATCH_SIZE = 100
+BATCH_SIZE = 1000
 Base = declarative_base()
 
 class Student(Base):
-    __tablename__ = 'y2021'
+    __tablename__ = 'y2020'
     sbd = Column(String(10), primary_key=True)
     toan = Column(DECIMAL(10, 3))
     van = Column(DECIMAL(10, 3))
@@ -48,8 +45,7 @@ Session = sessionmaker(bind=engine)
 class Thpt2023Pipeline:
     def __init__(self, batch_size=BATCH_SIZE):
         self.batch_size = batch_size
-        self.redis_client = redis.StrictRedis(host='localhost', port=6379, db=0)
-        self.items_key = 'thpt2023:items'
+        self.buffer = []
         self.db_connection = None
         self.cursor = None
 
@@ -66,32 +62,22 @@ class Thpt2023Pipeline:
         self.cursor = self.db_connection.cursor()
 
     def close_spider(self, spider):
-        """Inserts remaining items from Redis and closes the session."""
-        if self.redis_client.llen(self.items_key) > 0:
-            self.insert_batch(spider)
+        if self.buffer:
+            self.insert_batch_from_buffer(spider)
         self.db_connection.close()
 
     def process_item(self, item, spider):
-        """Cache items in Redis and insert in batches."""
-        self.redis_client.rpush(self.items_key, str(item))
-        if self.redis_client.llen(self.items_key) >= self.batch_size:
-            self.insert_batch(spider)
+        self.buffer.append(item)
+        if len(self.buffer) >= BATCH_SIZE:
+            self.insert_batch_from_buffer(spider)
         return item
 
-    def insert_batch(self, spider):
-        """Retrieve batch of items from Redis and insert into the database."""
+    def insert_batch_from_buffer(self, spider):
+        """Insert buffer items into the database and clear the buffer."""
         try:
-            items = []
-            for _ in range(self.batch_size):
-                item = self.redis_client.lpop(self.items_key)
-                if item:
-                    items.append(eval(item))
-                else:
-                    break
-            
-            if items:
+            if self.buffer:
                 query = """
-                    INSERT INTO students (sbd, toan, van, ngoaiNgu, vatLy, hoaHoc, sinhHoc, diemTBTuNhien, lichSu, diaLy, gdcd, diemTBXaHoi)
+                    INSERT INTO y2020 (sbd, toan, van, ngoaiNgu, vatLy, hoaHoc, sinhHoc, diemTBTuNhien, lichSu, diaLy, gdcd, diemTBXaHoi)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON DUPLICATE KEY UPDATE
                         toan = VALUES(toan),
@@ -108,17 +94,18 @@ class Thpt2023Pipeline:
                 """
                 data = [(item['sbd'], item['toan'], item['van'], item['ngoaiNgu'], item['vatLy'], item['hoaHoc'],
                          item['sinhHoc'], item['diemTBTuNhien'], item['lichSu'], item['diaLy'], item['gdcd'], item['diemTBXaHoi'])
-                        for item in items]
-                
+                        for item in self.buffer]
+
                 # Validate and clean the data before insertion
                 cleaned_data = validate_and_clean_data(data)
 
                 self.cursor.executemany(query, cleaned_data)
                 self.db_connection.commit()
                 print('Data pushed')
+                self.buffer = []  # Clear the buffer
         except Exception as e:
             self.db_connection.rollback()
-            spider.logger.error(f"Error inserting batch: {e}")
+            spider.logger.error(f"Error inserting buffer batch: {e}")
 
     def parse_database_uri(self, uri):
         """Parse the DATABASE_URI to extract connection parameters."""

@@ -9,7 +9,7 @@ pwd='123456'
 db='THPT'
 
 province_code_filepath = './THPT2023/spiders/province.json'
-score_filepath = 'score_2019.json'
+score_filepath = 'score_2020.json'
 missing_score_path = 'missing.json'
 
 def insert_raw_data_into_db():
@@ -40,7 +40,7 @@ def query_max_id_from_database():
     cursor = conn.cursor()
 
     query = """
-        select max(sbd) from y2019 where sbd like '*%';
+        select max(sbd) from y2020 where sbd like '*%';
     """
 
     max_ids = []
@@ -50,14 +50,14 @@ def query_max_id_from_database():
         id = cursor.fetchone()
         max_ids.append(id[0])
 
-    with open('max_ID_by_province_2019.txt', 'w') as f:
+    with open('max_ID_by_province_2020.txt', 'w') as f:
         for m in max_ids:
             f.write(f"{m}\n")
     f.close()
 
 
 def get_max_id_from_file():
-    with open('max_ID_by_province_2019.txt', 'r') as file:
+    with open('max_ID_by_province_2020.txt', 'r') as file:
         max_id = [line.strip() for line in file if line.strip()]
 
     return max_id
@@ -66,7 +66,7 @@ def find_possible_missing_id():
     conn = pymysql.connect(host=host, user=user, password=pwd, db=db)
     cursor = conn.cursor()
 
-    cursor.execute('SET @@cte_max_recursion_depth = 10000000;')
+    cursor.execute('SET @@cte_max_recursion_depth = 100000000;')
     query = """
     WITH RECURSIVE sequence AS (
     SELECT '$000001' AS id
@@ -77,8 +77,8 @@ def find_possible_missing_id():
     )
     SELECT sequence.id
     FROM sequence
-    LEFT JOIN y2019 ON sequence.id = y2019.sbd
-    WHERE y2019.sbd IS NULL;
+    LEFT JOIN y2020 ON sequence.id = y2020.sbd
+    WHERE y2020.sbd IS NULL;
     """
 
     max_ids = get_max_id_from_file()

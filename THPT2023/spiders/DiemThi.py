@@ -1,8 +1,9 @@
 import scrapy
 import json
+import pandas as pd
 
 
-base_url = 'https://diemthi.vnanet.vn/Home/SearchBySobaodanh?code=*&nam=2021'
+base_url = 'https://diemthi.vnanet.vn/Home/SearchBySobaodanh?code=*&nam=2023'
 ID_BUFFER = 300
 
 class DiemthiSpider(scrapy.Spider):
@@ -36,6 +37,8 @@ class DiemthiSpider(scrapy.Spider):
 
         # Loop through all provinces
         for p, mID in max_id_with_province_code.items():
+            if int(p) != 4:
+                continue
             for i in range(1, mID):
                 url = base_url.replace('*', p + str(i).zfill(6))
                 request = scrapy.Request(url=url, callback=self.parse)
