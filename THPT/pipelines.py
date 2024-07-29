@@ -6,49 +6,75 @@
 
 # useful for handling different item types with a single interface
 from itemadapter import ItemAdapter
-import sys
+from dotenv import load_dotenv
 import os
 import pymysql
-from sqlalchemy import create_engine, Column, String, DECIMAL
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy import create_engine, Column, String, DECIMAL, Table, MetaData
+from sqlalchemy.ext.declarative import declarative_base, DeclarativeMeta
+from sqlalchemy.orm import sessionmaker, mapper
+import ast
 
-BATCH_SIZE = 1000
+# READ FROM .env file
+#---------------------------------
+# Determine the root directory of your project
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+
+# Specify the path to the .env file
+dotenv_path = os.path.join(project_root, '.env')
+
+# Load the .env file
+load_dotenv(dotenv_path)
+#---------------------------------
+
+
+# ASSIGN VALUES READ FROM .ENV FILE TO VARIABLES
+#---------------------------------
+BUFFER_SIZE = 5
+
+DB_USER =  os.getenv("DB_USER")
+DB_PASSWORD = os.getenv("DB_PASSWORD")
+DB_HOST = os.getenv("DB_HOST")
+DB_PORT = os.getenv("DB_PORT")
+DB_NAME = os.getenv("DB_NAME")
+TARGET_YEARS = ast.literal_eval(os.getenv('TARGET_YEARS'))
+#---------------------------------
+
 Base = declarative_base()
+metadata = MetaData()
 
-class Student(Base):
-    __tablename__ = 'y2020'
-    sbd = Column(String(10), primary_key=True)
-    toan = Column(DECIMAL(10, 3))
-    van = Column(DECIMAL(10, 3))
-    ngoaiNgu = Column(DECIMAL(10, 3))
-    vatLy = Column(DECIMAL(10, 3))
-    hoaHoc = Column(DECIMAL(10, 3))
-    sinhHoc = Column(DECIMAL(10, 3))
-    diemTBTuNhien = Column(DECIMAL(10, 3))
-    lichSu = Column(DECIMAL(10, 3))
-    diaLy = Column(DECIMAL(10, 3))
-    gdcd = Column(DECIMAL(10, 3))
-    diemTBXaHoi = Column(DECIMAL(10, 3))
-
-DB_USER = 'root'
-DB_PASSWORD = '123456'
-DB_HOST = 'localhost'
-DB_PORT = '3306'
-DB_NAME = 'thpt'
+def create_student_table(table_name):
+    return Table(
+        table_name,
+        metadata,
+        Column('sbd', String(10), primary_key=True),
+        Column('toan', DECIMAL(10, 3)),
+        Column('van', DECIMAL(10, 3)),
+        Column('ngoaiNgu', DECIMAL(10, 3)),
+        Column('vatLy', DECIMAL(10, 3)),
+        Column('hoaHoc', DECIMAL(10, 3)),
+        Column('sinhHoc', DECIMAL(10, 3)),
+        Column('diemTBTuNhien', DECIMAL(10, 3)),
+        Column('lichSu', DECIMAL(10, 3)),
+        Column('diaLy', DECIMAL(10, 3)),
+        Column('gdcd', DECIMAL(10, 3)),
+        Column('diemTBXaHoi', DECIMAL(10, 3)),
+        extend_existing=True
+    )
 
 DATABASE_URI = f'mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}'
 engine = create_engine(DATABASE_URI)
-Base.metadata.create_all(engine)
+metadata.bind = engine
 Session = sessionmaker(bind=engine)
 
-class Thpt2023Pipeline:
-    def __init__(self, batch_size=BATCH_SIZE):
+
+class ThptPipeline:
+    def __init__(self, batch_size=BUFFER_SIZE):
         self.batch_size = batch_size
         self.buffer = []
         self.db_connection = None
         self.cursor = None
-
+        self.engine = engine
+        
     def open_spider(self, spider):
         """Initializes database connection and cursor."""
         db_config = self.parse_database_uri(DATABASE_URI)
@@ -68,7 +94,7 @@ class Thpt2023Pipeline:
 
     def process_item(self, item, spider):
         self.buffer.append(item)
-        if len(self.buffer) >= BATCH_SIZE:
+        if len(self.buffer) >= BUFFER_SIZE:
             self.insert_batch_from_buffer(spider)
         return item
 
@@ -76,8 +102,17 @@ class Thpt2023Pipeline:
         """Insert buffer items into the database and clear the buffer."""
         try:
             if self.buffer:
-                query = """
-                    INSERT INTO y2020 (sbd, toan, van, ngoaiNgu, vatLy, hoaHoc, sinhHoc, diemTBTuNhien, lichSu, diaLy, gdcd, diemTBXaHoi)
+                # Get the year from the first item in the buffer
+                year = self.buffer[0]['year']
+                table_name = f'y{year}_rep'
+
+                student_table = create_student_table(table_name)
+                student_table.create(engine, checkfirst=True)
+            
+                 # Ensure the table exists
+                Base.metadata.create_all(self.engine)
+                query = f"""
+                    INSERT INTO {table_name} (sbd, toan, van, ngoaiNgu, vatLy, hoaHoc, sinhHoc, diemTBTuNhien, lichSu, diaLy, gdcd, diemTBXaHoi)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON DUPLICATE KEY UPDATE
                         toan = VALUES(toan),
@@ -105,6 +140,7 @@ class Thpt2023Pipeline:
                 self.buffer = []  # Clear the buffer
         except Exception as e:
             self.db_connection.rollback()
+            print(e)
             spider.logger.error(f"Error inserting buffer batch: {e}")
 
     def parse_database_uri(self, uri):

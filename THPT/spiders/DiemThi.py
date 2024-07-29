@@ -1,10 +1,30 @@
 import scrapy
 import json
-import pandas as pd
+from dotenv import load_dotenv
+import os
+import ast
+
+# READ FROM .env FILE
+#---------------------------------
+# Determine the root directory of your project
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+
+# Specify the path to the .env file
+dotenv_path = os.path.join(project_root, '.env')
+
+# Load the .env file
+load_dotenv(dotenv_path)
+#---------------------------------
 
 
-base_url = 'https://diemthi.vnanet.vn/Home/SearchBySobaodanh?code=*&nam=2023'
-ID_BUFFER = 300
+# ASSIGN VALUES READ FROM .ENV FILE TO VARIABLES
+#---------------------------------
+BASE_URL = os.getenv("BASE_URL")
+ID_PADDING = int(os.getenv("ID_PADDING"))
+PROVINCE_CODE_PATH = os.getenv("PROVINCE_CODE_PATH")
+ESTIMATED_MAX_ID_PATH = os.getenv("ESTIMATED_MAX_ID_PATH")
+
+TARGET_YEARS = ast.literal_eval(os.getenv('TARGET_YEARS'))
 
 class DiemthiSpider(scrapy.Spider):
     name = "DiemThi"
@@ -25,28 +45,32 @@ class DiemthiSpider(scrapy.Spider):
         """
 
         # load province code, which is also being scrapped from another website
-        with open('./THPT2023/spiders/province.json', 'r', encoding='utf-8') as json_file:
+        with open(PROVINCE_CODE_PATH, 'r', encoding='utf-8') as json_file:
             province_code = list(json.load(json_file).keys())
         json_file.close()
         
-        with open('max_id.txt', 'r') as file:
+        # load estimated max ID of each province
+        with open(ESTIMATED_MAX_ID_PATH, 'r') as file:
             max_id = [line.strip() for line in file if line.strip()]
         file.close()
-        max_id = [int(id[2:]) + ID_BUFFER for id in max_id]
+        print(type(max_id[0]), max_id[0])
+        max_id = [int(id[2:]) + ID_PADDING for id in max_id]
         max_id_with_province_code = dict(zip(province_code, max_id))
 
-        # Loop through all provinces
-        for p, mID in max_id_with_province_code.items():
-            if int(p) != 4:
-                continue
-            for i in range(1, mID):
-                url = base_url.replace('*', p + str(i).zfill(6))
-                request = scrapy.Request(url=url, callback=self.parse)
-                yield request
+        # Loop through all years. Then for each years, loop through all provinces
+        for year in TARGET_YEARS:
+            base_url_with_year = BASE_URL + str(year)
+            for p, mID in max_id_with_province_code.items():
+                for i in range(1, 2):
+                    url = base_url_with_year.replace('*', p + str(i).zfill(6))
+                    request = scrapy.Request(url=url, callback=self.parse)
+                    request.meta['year'] = year
+                    yield request
 
 
     def parse(self, response):
         data = json.loads(response.text)
+        year = response.meta.get('year')
         for result in data.get('result', []):
             yield {
                 'sbd': result.get('Code'),
@@ -60,13 +84,15 @@ class DiemthiSpider(scrapy.Spider):
                 'lichSu': result.get('LichSu'),
                 'diaLy': result.get('DiaLi'),
                 'gdcd': result.get('GDCD'),
-                'diemTBXaHoi': result.get('KHXH')
+                'diemTBXaHoi': result.get('KHXH'),
+                'year': year
             }
 
 class AddMissingRecordSpider (scrapy.Spider):
     name = "AddMissing"
     allowed_domains = ["diemthi.vnanet.vn"]
     start_urls = []
+
     def start_requests(self):
         # load province code, which is also being scrapped from another website
         with open('possible_missing_id.txt', 'r') as file:
@@ -75,7 +101,7 @@ class AddMissingRecordSpider (scrapy.Spider):
 
         # Loop through all provinces
         for id in possible_missing_id:
-            url = base_url.replace('*', id)
+            url = BASE_URL.replace('*', id)
             request = scrapy.Request(url=url, callback=self.parse)
             yield request
 
@@ -96,5 +122,6 @@ class AddMissingRecordSpider (scrapy.Spider):
                 'lichSu': result.get('LichSu'),
                 'diaLy': result.get('DiaLi'),
                 'gdcd': result.get('GDCD'),
-                'diemTBXaHoi': result.get('KHXH')
+                'diemTBXaHoi': result.get('KHXH'),
+                'year': response.meta['year']
             }
