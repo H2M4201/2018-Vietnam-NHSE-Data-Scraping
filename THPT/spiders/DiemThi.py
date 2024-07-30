@@ -26,6 +26,11 @@ ESTIMATED_MAX_ID_PATH = os.getenv("ESTIMATED_MAX_ID_PATH")
 
 TARGET_YEARS = ast.literal_eval(os.getenv('TARGET_YEARS'))
 
+ # load province code, which is also being scrapped from another website
+with open(PROVINCE_CODE_PATH, 'r', encoding='utf-8') as json_file:
+    province_code = list(json.load(json_file).keys())
+json_file.close()
+
 class DiemthiSpider(scrapy.Spider):
     name = "DiemThi"
     allowed_domains = ["diemthi.vnanet.vn"]
@@ -43,26 +48,19 @@ class DiemthiSpider(scrapy.Spider):
         around 110k). If one province really hits the last ID, then from that ID onwards, it will return
         NULL. So if I receive 10 continuous NULL, I will break and move on to the next province
         """
-
-        # load province code, which is also being scrapped from another website
-        with open(PROVINCE_CODE_PATH, 'r', encoding='utf-8') as json_file:
-            province_code = list(json.load(json_file).keys())
-        json_file.close()
-        
         # load estimated max ID of each province
         with open(ESTIMATED_MAX_ID_PATH, 'r') as file:
-            max_id = [line.strip() for line in file if line.strip()]
+            estimated_max_id = [line.strip() for line in file if line.strip()]
         file.close()
-        print(type(max_id[0]), max_id[0])
-        max_id = [int(id[2:]) + ID_PADDING for id in max_id]
-        max_id_with_province_code = dict(zip(province_code, max_id))
+        estimated_max_id = [int(id[2:]) + ID_PADDING for id in estimated_max_id]
+        estimated_max_id_with_province_code = dict(zip(province_code, estimated_max_id))
 
         # Loop through all years. Then for each years, loop through all provinces
         for year in TARGET_YEARS:
             base_url_with_year = BASE_URL + str(year)
-            for p, mID in max_id_with_province_code.items():
-                for i in range(1, 2):
-                    url = base_url_with_year.replace('*', p + str(i).zfill(6))
+            for pCode, maxID in estimated_max_id_with_province_code.items():
+                for id in range(1, maxID):
+                    url = base_url_with_year.replace('*', pCode + str(id).zfill(6))
                     request = scrapy.Request(url=url, callback=self.parse)
                     request.meta['year'] = year
                     yield request
@@ -100,16 +98,18 @@ class AddMissingRecordSpider (scrapy.Spider):
         file.close()
 
         # Loop through all provinces
-        for id in possible_missing_id:
-            url = BASE_URL.replace('*', id)
-            request = scrapy.Request(url=url, callback=self.parse)
-            yield request
+        for year in TARGET_YEARS:
+            base_url_with_year = BASE_URL + str(year)
+            for id in possible_missing_id:
+                url = BASE_URL.replace('*', id)
+                request = scrapy.Request(url=url, callback=self.parse)
+                yield request
 
 
     def parse(self, response):
         data = json.loads(response.text)
+        year = response.meta.get('year')
         for result in data.get('result', []):
-            print(result)
             yield {
                 'sbd': result.get('Code'),
                 'toan': result.get('Toan'),
@@ -123,5 +123,5 @@ class AddMissingRecordSpider (scrapy.Spider):
                 'diaLy': result.get('DiaLi'),
                 'gdcd': result.get('GDCD'),
                 'diemTBXaHoi': result.get('KHXH'),
-                'year': response.meta['year']
+                'year': year
             }

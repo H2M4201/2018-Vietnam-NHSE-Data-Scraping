@@ -92,6 +92,7 @@ class ThptPipeline:
             self.insert_batch_from_buffer(spider)
         self.db_connection.close()
 
+
     def process_item(self, item, spider):
         year = item['year']
         if year not in self.buffer_by_year:
@@ -110,7 +111,7 @@ class ThptPipeline:
         try:
             for year, items in list(self.buffer_by_year.items()):
                 if items:
-                    table_name = f'y{year}_rep'
+                    table_name = f'y{year}'
                     
                     student_table = create_student_table(table_name)
                     student_table.create(engine, checkfirst=True)
@@ -185,8 +186,6 @@ def validate_and_clean_data(data):
     """
     cleaned_data = []
     for item in data:
-       cleaned_data = []
-    for item in data:
         cleaned_record = {
             'sbd': item['sbd'],
             'toan': None if item['toan'] == '' else item['toan'],
@@ -202,6 +201,5 @@ def validate_and_clean_data(data):
             'diemTBXaHoi': None if item['diemTBXaHoi'] == '' else item['diemTBXaHoi']
         }
         cleaned_data.append(cleaned_record)
-    print(cleaned_data)
 
     return cleaned_data
