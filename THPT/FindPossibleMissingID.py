@@ -109,6 +109,4 @@ def find_possible_missing_id():
     f.close()
 
 if __name__ == '__main__':
-    with open(POSSIBLE_MISSING_ID_PATH, 'r', encoding='utf-8') as f:
-        x = json.load(f)
-    print(type(x['2018'][0]))
+    find_possible_missing_id()
