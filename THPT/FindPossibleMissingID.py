@@ -1,4 +1,3 @@
-import pandas as pd
 import pymysql
 from sqlalchemy import create_engine
 import json
@@ -31,7 +30,6 @@ DB_PORT = os.getenv("DB_PORT")
 DB_NAME = os.getenv("DB_NAME")
 
 POSSIBLE_MISSING_ID_PATH = os.path.normpath(os.path.join(project_root, os.getenv("POSSIBLE_MISSING_ID_PATH")))
-print(POSSIBLE_MISSING_ID_PATH)
 #---------------------------------
 
 conn = pymysql.connect(host=DB_HOST, user=DB_USER, password=DB_PASSWORD, db=DB_NAME)
@@ -78,7 +76,8 @@ def find_possible_missing_id_by_province(cursor, table_name, pCode, maxID):
         WHERE {table_name}.sbd IS NULL;
     """
     cursor.execute(query)
-    missing_id_by_province = list(cursor.fetchall())
+    missing_id_by_province = [item[0] for item in cursor.fetchall()]
+    print(missing_id_by_province)
 
     return missing_id_by_province
 

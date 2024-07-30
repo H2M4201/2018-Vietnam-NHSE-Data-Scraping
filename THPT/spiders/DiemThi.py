@@ -8,7 +8,6 @@ import ast
 #---------------------------------
 # Determine the root directory of your project
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
-
 # Specify the path to the .env file
 dotenv_path = os.path.join(project_root, '.env')
 
@@ -23,6 +22,7 @@ BASE_URL = os.getenv("BASE_URL")
 ID_PADDING = int(os.getenv("ID_PADDING"))
 PROVINCE_CODE_PATH = os.getenv("PROVINCE_CODE_PATH")
 ESTIMATED_MAX_ID_PATH = os.getenv("ESTIMATED_MAX_ID_PATH")
+POSSIBLE_MISSING_ID_PATH = os.path.normpath(os.path.join(project_root, os.getenv("POSSIBLE_MISSING_ID_PATH")))
 
 TARGET_YEARS = ast.literal_eval(os.getenv('TARGET_YEARS'))
 
@@ -93,16 +93,17 @@ class AddMissingRecordSpider (scrapy.Spider):
 
     def start_requests(self):
         # load province code, which is also being scrapped from another website
-        with open('possible_missing_id.txt', 'r') as file:
-            possible_missing_id = [line.strip() for line in file if line.strip()]
+        with open(POSSIBLE_MISSING_ID_PATH, 'r', encoding='utf-8') as file:
+            possible_missing_id = json.load(file)
         file.close()
 
         # Loop through all provinces
         for year in TARGET_YEARS:
             base_url_with_year = BASE_URL + str(year)
-            for id in possible_missing_id:
-                url = BASE_URL.replace('*', id)
+            for id in possible_missing_id[str(year)]:
+                url = base_url_with_year.replace('*', id)
                 request = scrapy.Request(url=url, callback=self.parse)
+                request.meta['year'] = year
                 yield request
 
 
