@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 import os
 import pymysql
 from sqlalchemy import create_engine, Column, String, DECIMAL, Table, MetaData
-from sqlalchemy.ext.declarative import declarative_base, DeclarativeMeta
+from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, mapper
 import ast
 
@@ -29,7 +29,7 @@ load_dotenv(dotenv_path)
 
 # ASSIGN VALUES READ FROM .ENV FILE TO VARIABLES
 #---------------------------------
-BUFFER_SIZE = 5
+BUFFER_SIZE = int(os.getenv("BUFFER_SIZE"))
 
 DB_USER =  os.getenv("DB_USER")
 DB_PASSWORD = os.getenv("DB_PASSWORD")
@@ -70,7 +70,7 @@ Session = sessionmaker(bind=engine)
 class ThptPipeline:
     def __init__(self, batch_size=BUFFER_SIZE):
         self.batch_size = batch_size
-        self.buffer = []
+        self.buffer_by_year = {}
         self.db_connection = None
         self.cursor = None
         self.engine = engine
@@ -88,60 +88,79 @@ class ThptPipeline:
         self.cursor = self.db_connection.cursor()
 
     def close_spider(self, spider):
-        if self.buffer:
+        if self.buffer_by_year:
             self.insert_batch_from_buffer(spider)
         self.db_connection.close()
 
     def process_item(self, item, spider):
-        self.buffer.append(item)
-        if len(self.buffer) >= BUFFER_SIZE:
+        year = item['year']
+        if year not in self.buffer_by_year:
+            self.buffer_by_year[year] = []
+        self.buffer_by_year[year].append(item)
+        
+        # Check if any of the year-based buffers exceed the batch size
+        if any(len(items) >= self.batch_size for items in self.buffer_by_year.values()):
             self.insert_batch_from_buffer(spider)
+        
         return item
+
 
     def insert_batch_from_buffer(self, spider):
         """Insert buffer items into the database and clear the buffer."""
         try:
-            if self.buffer:
-                # Get the year from the first item in the buffer
-                year = self.buffer[0]['year']
-                table_name = f'y{year}_rep'
+            for year, items in list(self.buffer_by_year.items()):
+                if items:
+                    table_name = f'y{year}_rep'
+                    
+                    student_table = create_student_table(table_name)
+                    student_table.create(engine, checkfirst=True)
+                    
+                    # Clean and prepare data for insertion
+                    cleaned_data = validate_and_clean_data(items)
+                    query = f"""
+                        INSERT INTO {table_name} (sbd, toan, van, ngoaiNgu, vatLy, hoaHoc, sinhHoc, diemTBTuNhien, lichSu, diaLy, gdcd, diemTBXaHoi)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        ON DUPLICATE KEY UPDATE
+                            toan = VALUES(toan),
+                            van = VALUES(van),
+                            ngoaiNgu = VALUES(ngoaiNgu),
+                            vatLy = VALUES(vatLy),
+                            hoaHoc = VALUES(hoaHoc),
+                            sinhHoc = VALUES(sinhHoc),
+                            diemTBTuNhien = VALUES(diemTBTuNhien),
+                            lichSu = VALUES(lichSu),
+                            diaLy = VALUES(diaLy),
+                            gdcd = VALUES(gdcd),
+                            diemTBXaHoi = VALUES(diemTBXaHoi)
+                    """
 
-                student_table = create_student_table(table_name)
-                student_table.create(engine, checkfirst=True)
-            
-                 # Ensure the table exists
-                Base.metadata.create_all(self.engine)
-                query = f"""
-                    INSERT INTO {table_name} (sbd, toan, van, ngoaiNgu, vatLy, hoaHoc, sinhHoc, diemTBTuNhien, lichSu, diaLy, gdcd, diemTBXaHoi)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    ON DUPLICATE KEY UPDATE
-                        toan = VALUES(toan),
-                        van = VALUES(van),
-                        ngoaiNgu = VALUES(ngoaiNgu),
-                        vatLy = VALUES(vatLy),
-                        hoaHoc = VALUES(hoaHoc),
-                        sinhHoc = VALUES(sinhHoc),
-                        diemTBTuNhien = VALUES(diemTBTuNhien),
-                        lichSu = VALUES(lichSu),
-                        diaLy = VALUES(diaLy),
-                        gdcd = VALUES(gdcd),
-                        diemTBXaHoi = VALUES(diemTBXaHoi)
-                """
-                data = [(item['sbd'], item['toan'], item['van'], item['ngoaiNgu'], item['vatLy'], item['hoaHoc'],
-                         item['sinhHoc'], item['diemTBTuNhien'], item['lichSu'], item['diaLy'], item['gdcd'], item['diemTBXaHoi'])
-                        for item in self.buffer]
-
-                # Validate and clean the data before insertion
-                cleaned_data = validate_and_clean_data(data)
-
-                self.cursor.executemany(query, cleaned_data)
-                self.db_connection.commit()
-                print('Data pushed')
-                self.buffer = []  # Clear the buffer
+                    self.cursor.executemany(query, [
+                    (
+                        item['sbd'],
+                        item['toan'],
+                        item['van'],
+                        item['ngoaiNgu'],
+                        item['vatLy'],
+                        item['hoaHoc'],
+                        item['sinhHoc'],
+                        item['diemTBTuNhien'],
+                        item['lichSu'],
+                        item['diaLy'],
+                        item['gdcd'],
+                        item['diemTBXaHoi']
+                    ) for item in cleaned_data
+                ])
+                    self.db_connection.commit()
+                    print(f'Data for year {year} pushed')
+                    
+                    # Clear the buffer for this year
+                    self.buffer_by_year[year] = []
+                    
         except Exception as e:
             self.db_connection.rollback()
-            print(e)
             spider.logger.error(f"Error inserting buffer batch: {e}")
+
+            
 
     def parse_database_uri(self, uri):
         """Parse the DATABASE_URI to extract connection parameters."""
@@ -165,11 +184,24 @@ def validate_and_clean_data(data):
     Convert empty strings to None for decimal columns.
     """
     cleaned_data = []
-    for record in data:
-        cleaned_record = tuple(
-            None if value == '' else
-            str(value).replace('\n', '').replace('\r', '').replace('\t', '').strip() if isinstance(value, str) else value
-            for value in record
-        )
+    for item in data:
+       cleaned_data = []
+    for item in data:
+        cleaned_record = {
+            'sbd': item['sbd'],
+            'toan': None if item['toan'] == '' else item['toan'],
+            'van': None if item['van'] == '' else item['van'],
+            'ngoaiNgu': None if item['ngoaiNgu'] == '' else item['ngoaiNgu'],
+            'vatLy': None if item['vatLy'] == '' else item['vatLy'],
+            'hoaHoc': None if item['hoaHoc'] == '' else item['hoaHoc'],
+            'sinhHoc': None if item['sinhHoc'] == '' else item['sinhHoc'],
+            'diemTBTuNhien': None if item['diemTBTuNhien'] == '' else item['diemTBTuNhien'],
+            'lichSu': None if item['lichSu'] == '' else item['lichSu'],
+            'diaLy': None if item['diaLy'] == '' else item['diaLy'],
+            'gdcd': None if item['gdcd'] == '' else item['gdcd'],
+            'diemTBXaHoi': None if item['diemTBXaHoi'] == '' else item['diemTBXaHoi']
+        }
         cleaned_data.append(cleaned_record)
+    print(cleaned_data)
+
     return cleaned_data
